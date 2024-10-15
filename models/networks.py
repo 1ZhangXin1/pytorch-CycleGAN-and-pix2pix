@@ -435,6 +435,17 @@ class ResnetBlock(nn.Module):
         out = x + self.conv_block(x)  # add skip connections
         return out
 
+class UnetGenerator_attention(nn.Module):
+    """Create a Unet-with-attention and resnetblock generator"""
+    pass
+
+
+
+
+
+
+
+
 
 class UnetGenerator(nn.Module):
     """Create a Unet-based generator"""
