@@ -435,16 +435,173 @@ class ResnetBlock(nn.Module):
         out = x + self.conv_block(x)  # add skip connections
         return out
 
+
+
+
+
+
+class ResBlock(nn.Module):
+    """残差块，包含两个卷积层和一个跳跃连接"""
+    def __init__(self, in_channels, out_channels):
+        super(ResBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        # 如果输入和输出通道不相同，则需要额外的 1x1 卷积来匹配维度
+        if in_channels != out_channels:
+            self.residual_conv = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
+        else:
+            self.residual_conv = None
+
+    def forward(self, x):
+        residual = x
+
+        # 如果通道不匹配，则调整 residual 的通道数
+        if self.residual_conv:
+            residual = self.residual_conv(x)
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        # 跳跃连接
+        out += residual
+        out = self.relu(out)
+
+        return out
+
+
+# 定义下采样模块，使用 ResBlock 代替标准卷积块
+class DownBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(DownBlock, self).__init__()
+        self.res_block = ResBlock(in_channels, out_channels)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+    def forward(self, x):
+        conv_output = self.res_block(x)
+        pooled_output = self.pool(conv_output)
+        return conv_output, pooled_output
+
+# 定义上采样模块，仍然使用 ResBlock
+class UpBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(UpBlock, self).__init__()
+        self.up_conv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+        self.res_block = ResBlock(in_channels, out_channels)
+
+    def forward(self, x, skip_connection):
+        x = self.up_conv(x)
+        x = torch.cat([x, skip_connection], dim=1)
+        x = self.res_block(x)
+        return x
+
+class AttentionBlock(nn.Module):
+    def __init__(self, F_g, F_l, F_int):
+        super(AttentionBlock, self).__init__()
+        
+        # 用 1x1 卷积将输入和跳跃连接的特征图进行通道压缩
+        self.W_g = nn.Sequential(
+            nn.Conv2d(F_g, F_int, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(F_int)
+        )
+        
+        self.W_x = nn.Sequential(
+            nn.Conv2d(F_l, F_int, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(F_int)
+        )
+        
+        # 通过 1x1 卷积后，再进行非线性激活
+        self.psi = nn.Sequential(
+            nn.Conv2d(F_int, 1, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(1),
+            nn.Sigmoid()
+        )
+        
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, g, x):
+        # g 是来自上采样路径的特征，x 是来自编码器的跳跃连接特征
+        g1 = self.W_g(g)
+        x1 = self.W_x(x)
+        
+        # 相加后激活
+        psi = self.relu(g1 + x1)
+        psi = self.psi(psi)
+        
+        # 对跳跃连接的输入进行加权
+        return x * psi
+
+class UpBlockWithAttention(nn.Module):
+    def __init__(self, in_channels, out_channels, F_int):
+        super(UpBlockWithAttention, self).__init__()
+        self.up_conv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+        self.attention = AttentionBlock(F_g=out_channels, F_l=out_channels, F_int=F_int)
+        self.res_block = ResBlock(in_channels, out_channels)
+
+    def forward(self, x, skip_connection):
+        x = self.up_conv(x)
+        
+        # 在 skip connection 中加入 Attention
+        skip_connection = self.attention(x, skip_connection)
+        
+        # 将跳跃连接和上采样结果拼接
+        x = torch.cat([x, skip_connection], dim=1)
+        x = self.res_block(x)
+        return x
+
+
+
 class UnetGenerator_attention(nn.Module):
-    """Create a Unet-with-attention and resnetblock generator"""
-    pass
+    """Create a Unet-with-attention and resblock generator"""
+    def __init__(self, input_nc, output_nc, num_downs=8, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False):
+        """
+        fake
+        """
+        super(UnetGenerator_attention, self).__init__()
+# 下采样部分
+        self.down1 = DownBlock(input_nc, 64)
+        self.down2 = DownBlock(64, 128)
+        self.down3 = DownBlock(128, 256)
+        self.down4 = DownBlock(256, 512)
 
+        # 底部的卷积块
+        self.middle_conv = ResBlock(512, 1024)
 
+        # 上采样部分
+        self.up1 = UpBlockWithAttention(1024, 512, 256)
+        self.up2 = UpBlockWithAttention(512, 256, 128)
+        self.up3 = UpBlockWithAttention(256, 128, 64)
+        self.up4 = UpBlockWithAttention(128, 64, 32)
 
+        # 最终输出层
+        self.final_conv = nn.Conv2d(64, output_nc, kernel_size=1)
 
+    def forward(self, x):
+        # 下采样路径
+        skip1, x = self.down1(x)
+        skip2, x = self.down2(x)
+        skip3, x = self.down3(x)
+        skip4, x = self.down4(x)
 
+        # 底部的卷积块
+        x = self.middle_conv(x)
 
+        # 上采样路径，带有 Attention
+        x = self.up1(x, skip4)
+        x = self.up2(x, skip3)
+        x = self.up3(x, skip2)
+        x = self.up4(x, skip1)
 
+        # 输出层
+        x = self.final_conv(x)
+        return x
 
 
 class UnetGenerator(nn.Module):
