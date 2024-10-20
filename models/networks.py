@@ -157,6 +157,8 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     elif netG == 'unet_256_attention':
         net = UnetGenerator_attention(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG =='UnetGenerator_att':
+        net = UnetGenerator_att(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -557,6 +559,49 @@ class UpBlockWithAttention(nn.Module):
         return x
 
 
+
+from diffusers import UNet2DModel
+import torch
+
+class UNet2DModelNoTimestep(UNet2DModel):
+    def forward(self, sample, timestep=None, **kwargs):
+        # 给 timestep 一个默认值，比如 0
+        if timestep is None:
+            timestep = torch.tensor([0], device=sample.device, dtype=torch.long)
+        # 直接返回 sample 输出
+        return super().forward(sample, timestep)["sample"]
+
+
+
+
+class UnetGenerator_att(nn.model):
+    """ye!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"""
+    def __init__(self, input_nc, output_nc, num_downs=8, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False):
+        """
+        fake
+        """
+        self.model = UNet2DModelNoTimestep(
+            sample_size=256,       # 输入图像的大小（64x64）
+            in_channels=input_nc,        # 输入图像的通道数（例如 RGB 图片为 3）
+            out_channels=output_nc,       # 输出图像的通道数
+            layers_per_block=2,   # 每个块中的卷积层数
+            block_out_channels=(64, 128, 256, 512),  # 每个块的输出通道数
+            down_block_types=(
+                "DownBlock2D",    # 使用的下采样块类型
+                "DownBlock2D",
+                "DownBlock2D",
+                "DownBlock2D",
+            ),
+            up_block_types=(
+                "UpBlock2D",      # 使用的上采样块类型
+                "UpBlock2D",
+                "UpBlock2D",
+                "UpBlock2D",
+            ),
+        )
+    def forward(self, x):
+        output = self.model(x)
+        return output        
 
 class UnetGenerator_attention(nn.Module):
     """Create a Unet-with-attention and resblock generator"""
