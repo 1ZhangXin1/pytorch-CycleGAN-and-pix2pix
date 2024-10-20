@@ -580,6 +580,8 @@ class UnetGenerator_att(nn.Module):
         """
         fake
         """
+        
+    def forward(self, x):
         self.mmodel = UNet2DModelNoTimestep(
             sample_size=256,       # 输入图像的大小（64x64）
             in_channels=input_nc,        # 输入图像的通道数（例如 RGB 图片为 3）
@@ -599,7 +601,6 @@ class UnetGenerator_att(nn.Module):
                 "UpBlock2D",
             ),
         )
-    def forward(self, x):
         output = self.mmodel(x)
         return output        
 
