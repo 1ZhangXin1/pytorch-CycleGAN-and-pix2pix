@@ -574,7 +574,7 @@ class UNet2DModelNoTimestep(UNet2DModel):
 
 
 
-class UnetGenerator_att(nn.Model):
+class UnetGenerator_att(nn.Module):
     """ye!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"""
     def __init__(self, input_nc, output_nc, num_downs=8, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False):
         """
